@@ -1,0 +1,515 @@
+---
+title: "What emotion makes people engage more with politician's tweets?--2022 GWU Datathon Report by Xiang Li"
+output: 
+  word_document:
+    toc: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+knitr::opts_chunk$set(fig.width = 4, fig.height = 3, fig.align = "center")
+library(rmarkdown)
+library(knitr)
+library(tidyverse)
+library(lubridate)
+
+library(officer)
+library(flextable)
+use_df_printer()
+
+colors_xl <- c("#abd9e9", "#e9daab", "#e9abba", "#abbae9")
+
+# table format
+tb_flextable <- function(data, caption, seq_id, bkm) {
+  tb <- qflextable(data)
+  tb <- set_table_properties(tb, width = 0.8, layout = "autofit")
+  tb <- set_caption(tb,
+    caption = caption,
+    autonum = run_autonum(seq_id = seq_id, bkm = bkm)
+  )
+  tb
+}
+```
+
+# Abstract
+
+The social media has become an indispensable part in human's life, which has served as a major platform for knowledge & news sharing and makes it possible for people around the world get connected. Among all the social media platforms, Twitter has been a critical tool for politicians to advocate their policies. Therefore, a natural question to ask is how politicians can make Twitter users to engage with their tweets so that they can amply their influence and facilitate the proceedings of their policies and campaigns. In this report, given the tweets posted by the US senators and representatives in the month January 2021, I will investigate how the emotions expressed in the tweets, such as anger, joy, sadness etc., are affecting people's engagements with the politicians' tweets, both quantitatively and qualitatively. The final data set used for the analysis has 19 variables and 39396 observations/tweets. The outcome variable is binary and it identifies whether or not a tweet has active engagement with people. The independent predictors are composed of two parts: user-specific predictors and tweet-specific predictors. A set of logistic models are fitted to investigate the contributions of different emotions to the probability of people engaging with the tweet. The result shows that, among all the analyzed emotions (anger, joy, sadness, anticipation, trust, surprise and disgust), "anger" contributes more to the tweets engagement then other emotions, "joy" makes the second largest contribution. In addition, the contribution from "anger" and "joy" to the tweets engagement varies dependent on which party the politician belongs to. Democratic and republican politicians are more divided in their tweets content when the tweets express anger emotions, while they are less divided when the tweets content express joy emotions.
+
+# Supplementary material
+
+Code, report and video presentations are available on Xiang Li's github repository at ?????.
+
+# Exploratory data analysis
+
+## Clarify research question
+
+It's important to clarify the research question at the very beginning, which can help readers understand how each analysis step serves the ultimate goal. In the report, I will investigate how different emotions (anger, joy, sadness, etc.) expressed in the tweet affect people's engagements  with it. 
+
+## Use tweets collected in Jan. 2021
+
+The full data set contains tweets posted by the US senators and representatives from 2008 to 2021 of different languages. In this report, only tweets in English are investigated. From the three bar plots, it can be observed that the number of posted tweets is increasing by year. In year 2021, the number of posted tweets in each month is pretty much the same around 40000, except in December due to that data collection ends early in December 2021. The number of unique Twitter users who have posted at least one tweet in each month is approximately the same around 500. Therefore, from the perspective of tweets volume and user participation, the data looks homogeneous across different months in 2021. Due to the time and computation limits, I will use tweets collected in Jan. 2021 for this report. 
+
+```{r}
+load("data/df_full.rda")
+
+## make bar plot of Number of tweets VS year
+df_full %>% 
+  filter(lang == "en") %>% 
+  mutate(year = year(created_at)) %>% 
+  group_by(year) %>% 
+  summarise(n = n()) %>% 
+  ungroup() %>% 
+  ggplot(aes(x=year, y = n)) +
+  geom_bar(stat = "identity", fill = colors_xl[1]) +
+  labs(x="Year", y="Number of tweets", title = "Number of tweets by year")+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+```{r}
+## make bar plot of Number of tweets by month in 2021
+df_full %>% 
+  filter(lang == "en") %>% 
+  mutate(year = year(created_at),
+         month = month(created_at)) %>% 
+  filter(year == 2021) %>% 
+  group_by(month) %>% 
+  summarise(n = n()) %>% 
+  ungroup() %>% 
+  ggplot(aes(x=as.factor(month), y = n)) +
+  geom_bar(stat = "identity", fill = colors_xl[3]) +
+  labs(x="Month", y="Number of tweets", title = "Number of tweets by month in 2021")+
+  theme_minimal()
+```
+
+```{r}
+rm(df_full)
+load("data/df_2021_name.rda")
+
+## make bar plot of Number of unique users VS month in 2021
+df_2021_name %>% 
+  mutate(month = month(created_at)) %>% 
+  group_by(month) %>% 
+  summarise(n = length(unique(screen_name))) %>% 
+  ungroup() %>% 
+  ggplot(aes(x=as.factor(month), y = n)) +
+  geom_bar(stat = "identity", fill = colors_xl[4]) +
+  labs(x="Month", y="Number of politicians", title = "Number of politicians by month in 2021")+
+  theme_minimal()
+```
+
+
+## Preliminary variable selection
+
+Twitter API provides 90 features for each tweet. After checking the missingness and meaning of each feature, features that have majority missing values, like `quote_count`, are removed; Features that have repeated meanings, like `reply_to_user_id` and `reply_to_screen_name`, are removed; Features that have singular values, like `media_type`, are removed; Features that are irrelevant to the research questions, like `source`, are removed. Only 37 features are retained, and their names are listed below.
+
+```{r}
+rm(df_2021_name)
+
+## variable names
+var_names <- c("favorite_count", "retweet_count", "followers_count", "statuses_count", # relate to outcome
+               "reply_to_status_id", "is_quote", "is_retweet", # relate to independence of the tweet
+               "user_id", "screen_name", "friends_count", "listed_count", "favourites_count", # relate user profiles
+               "status_id", "created_at", "text", "hashtags", 
+               "urls_url", "media_url", "mentions_user_id", # relate to independent tweet content
+               "quoted_status_id", "quoted_screen_name", "quoted_text", "quoted_created_at",
+               "quoted_favorite_count", "quoted_retweet_count", "quoted_followers_count", 
+               "quoted_friends_count", "quoted_statuses_count",  # relate to quoted tweet
+               "retweet_status_id", "retweet_screen_name", "retweet_text", "retweet_created_at",
+               "retweet_favorite_count", "retweet_retweet_count", "retweet_followers_count",
+               "retweet_friends_count", "retweet_statuses_count" # relate to retweet tweet
+               )
+var_names
+```
+
+
+# Data preprocessing
+
+In the step of data preprocessing, I will construct the binary response variable, the user-specific predictors and the tweet-specific predictors from the previously selected 37 features. After the feature engineering, there are 19 variables in total for the model fitting.
+
+## Construct the binary outcome variable
+
+The question of interest is to predict the Twitter users' engagement with the posted tweet, so we need to first define engagement and explain how to quantify it. According to the [Twitter help center](https://help.twitter.com/en/managing-your-account/using-the-tweet-activity-dashboard), engagement means the number of times users interacted with a tweet, including Retweets, replies, follows, likes, links, cards, hashtags, embedded media, username, profile photo, or Tweet expansion. Here in the report, I use a different and simplified definition for engagement. 
+
+I first define the `engagement rate`:
+
+$$\small engage\_rate = \frac{1}{2}(\frac{favoriate\_count + retweet\_count}{followers\_count}+\frac{favoriate\_count + retweet\_count}{statuses\_count}) $$
+where `favoriate_count` and `retweet_count` are the number of favorites and retweets received by the tweet, and `followers_count` and `statuses_count` are the tweet user's followers number and the total number of tweets that the user has posted respectively. In principle, the rate takes into account the average interaction gives out by each follower and the average interaction received by each tweet. Using this equation, I then calculate the engagement rates for all tweets posted by the politicians in the year 2021 and locate the 75% percentile, and assign it to a constant variable `engage\_thresh`. Next I define the binary variable `engage_active`, which has value 1 if the tweet's engagement rate is above that `engage\_thresh`, otherwise it's 0. `engage_active=1` indicates that the tweet has active engagement.
+
+$$engage\_active = ifelse (engage\_rate > engage\_thresh, 1,0 ).$$
+
+## Construct the tweet user-specific predictors
+
+The information about a tweet comes from two parts, (1) the general information of the tweet such as users' data, and (2) the text information of the tweet such the emotions. In this step, I construct 10 variables with regard to the tweet's general information. 
+
+1. `party (categorical)`: which party (Independent, Republican, Democratic) the politician belongs to. I web-scraped the social media accounts of the politicians from the [public website](https://triagecancer.org/congressional-social-media) then assign the party information to each user.
+
+2. `favor_perFriend (numerical)`: average number of favorites given by the user to the friends (people followed by the user).
+
+3. `listed_level (numerical)`: if the number of organizations the user belongs to is less than the 0.25-th percentile of the number among all users, the `listed_level = 1`. If the number is less than the 0.50-th percentile, the `listed_level = 2`. If the number is less than the 0.75-th percentile, the `listed_level = 3`. If the number is greater than the 0.75-th percentile, the `listed_level = 4`.
+
+4. `has_url (binary)`: whether or not url is included in the tweet.
+
+5. `has_media (binary)`: whether or not media (photo) is included in the tweet.
+
+6. `is_independent (binary)`: if the tweet is not quoted or retweeted or a reply, it's an independent tweet, otherwise it's not independent.
+
+7. `engageQuoted_active (binary)`: the engage activity of the quoted tweet. same definition as the `engage_active`.
+
+8. `engageRetweet_active (binary)`: the engage activity of the retweeted tweet. same definition as the `engage_active`.
+
+9. `hashtag_num (numeric)`: the number of hashtag in the tweet.
+
+10. `metion_num (numeric)`: the number of mentioned names in the tweet.
+
+
+## Construc the tweet emotion-specific predictors
+
+Each tweet text is first cleaned by removing the emojis, urls, punctuations, extra white spaces and numbers. Then the cleaned text is tokenized into words and from which common stop words (e.g. is, and) are removed. Then I use the [NRC word-emotion association lexicon](https://saifmohammad.com/WebPages/NRC-Emotion-Lexicon.htm) to classify each word into different emotions. Last the number of words of each emotion in a tweet is calculated and divided by the length of the cleaned tweet text.
+
+1. `textLength (numeric)`: length of the cleaned tweet text.
+
+2. `anticipation (numeric)`: average number of words belong to anticipation in a tweet.
+
+3. `anger (numeric)`: average number of words belong to anger in a tweet.
+
+4. `fear (numeric)`: average number of words belong to fear in a tweet.
+
+5. `negative (numeric)`: average number of words belong to negative in a tweet.
+
+6. `joy (numeric)`: average number of words belong to joy in a tweet.
+
+7. `positive (numeric)`: average number of words belong to positive in a tweet.
+
+8. `trust (numeric)`: average number of words belong to trust in a tweet.
+
+9. `sadness (numeric)`: average number of words belong to sadness in a tweet.
+
+10. `surprise (numeric)`: average number of words belong to surprise in a tweet.
+
+11. `disgust (numeric)`: average number of words belong to disgust in a tweet.
+
+
+As we can observe from the summary statistics of each emotions, their distribution are approximately in the same range.
+
+```{r}
+load("data/data_train.rda")
+
+## calculate summmary statistics
+vars_emotion <- c("anticipation", "anger", "joy", "trust", "sadness", "surprise", "disgust")
+tb_sum <- round(sapply(data_train[, vars_emotion], summary), 4) %>% 
+  as.data.frame() %>% 
+  add_column(Stat = c("Min.", "1st-Quantile", "Median", "Mean", "3rd-Quantile", "Max"), .before = 1)
+
+tb_flextable(tb_sum, "Summary statistics of the emotions", 2, 1)
+```
+
+## Check collinearity
+
+Collinearity between variables can adversely affect the model performance and gives inaccurate model inference. Therefore, collinearity needs to be checked before we proceed to the model fitting. So far, there are 22 variables constructed from the original tweet features. Table2 shows that variables `anger`, `fear`, `sadness`, `negative` have high correlations, and `joy`, `trust`, `positive` have high correlations. Therefore, I will remove variables `negative`, `positve` and `fear` from the features, which leaves us with 19 variables in total.
+
+```{r}
+## calculate the correlations between variables
+tb_cor <- Hmisc::rcorr(as.matrix(data_train[, !names(data_train) %in% c("party")]))$r %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var="variable1") %>% 
+  pivot_longer(-variable1, "variable2") %>% 
+  filter(abs(value)>0.6 & abs(value)!=1) %>% 
+  mutate(value = round(value, 2)) %>% 
+  rename(correlation = value)
+
+tb_flextable(tb_cor, "variables with correlations above 0.6", 2, 2)
+```
+
+
+# Model selection and validation
+
+In the final data set for analysis, a total of 19 variables (including the outcome variable) and 39396 observations are used. A set of logistic regression models are fitted to investigate the contributions of different emotions to the probability of tweets engagement.
+
+
+## Logistic linear regression model 
+
+```{r}
+library(rms)
+## remove highly correlated variables
+vars_rm <- c("fear", 'negative', 'positive')
+data_model <- data_train %>% select(-vars_rm) 
+rm(data_train)
+
+## fit logistic linear regression model
+dd <- datadist(data_model)
+options(datadist = "dd")
+mod_logit_lrm <- lrm(engage_active ~ ., data = data_model,
+                        x= TRUE, y = TRUE)
+mod_logit_glm <- glm(engage_active ~ ., data = data_model, family = binomial)
+```
+
+logistic linear regression model formula:
+
+```{r}
+# model formula
+formula(mod_logit_glm)
+```
+
+coefficients and their statistical significance 
+
+```{r}
+# coefficients information
+summary(mod_logit_glm)$coef
+```
+
+## Contributions of different emotions
+
+The test statistics from ANOVA are applied to compare the relative contributions of predictors to the probability of tweets engagement. The plot shows that the dependent information of retweeted and quoted tweets make the most contribution the outcome probability. Among all the 7 emotions being investigated, the anger contributes more than other emotions, and joy is the second largest. In the following analysis, I will focus on the two emotions anger and joy.
+
+```{r fig.width = 6, fig.height = 5}
+anova_logit_lrm <- anova(mod_logit_lrm)
+plot(anova_logit_lrm)
+```
+
+## logistic spline model
+
+Though from last step it shows that anger and joy are statistically significant, but they may have a non-linear relation with the probability of tweets engagement. Here I fit a logistic spline model and apply natural cubic spline with 5 knots on variables anger and joy respectively. The ANOVA test shows that the non-linearity of anger and joy has statistical significance.
+
+```{r}
+library(splines)
+# fit spline model, add natural cubic spline on anger and joy
+mod_spline_glm <- glm(engage_active ~ . -anger -joy + ns(anger, 5) + ns(joy, 5), 
+                      family = binomial, data = data_model)
+```
+
+Spline model formula. 
+
+```{r}
+formula(mod_spline_glm)
+```
+
+ANOVA test has P-value `1-pchisq(97.619, 4) = 0` less than 0.05, which indicates the statistical significance of non-linearity of anger and joy.
+
+```{r}
+# ANOVA test shows the statistical significance of the non-linear terms
+anova(mod_logit_glm, mod_spline_glm) 
+
+# Pvalue less than the significan level 0.05
+# 1-pchisq(97.619, 4) < 0.05
+```
+
+## logistic spline with interaction between party and emotions
+
+It's an interesting question to ask that if emotions anger and joy make different contributions when taking into account the politicians' party. Here I fit a spline model with interaction terms between anger and party, and joy and party. The ANOVA test shows that the interaction terms have statistical significance.
+
+
+```{r}
+library(splines)
+# fit spline model, add natural cubic spline on anger and joy
+mod_inter_glm <- glm(engage_active ~ . -anger -joy + 
+                       party*ns(anger, 5) + party*ns(joy, 5), 
+                      family = binomial, data = data_model)
+```
+
+Spline model with interaction formula. 
+
+```{r}
+formula(mod_inter_glm)
+```
+
+ANOVA test has P-value `1-pchisq(25.86, 13) = 0.018` less than 0.05, which indicates the statistical significance of interaction between of emotions and party.
+
+```{r}
+# ANOVA test shows the statistical significance of the non-linear terms
+anova(mod_spline_glm, mod_inter_glm) 
+
+# Pvalue less than the significan level 0.05
+# 1-pchisq(25.86, 13) < 0.05
+```
+
+## Relation between emotions and the outcome probability
+
+Since emotions have a non-linear relation with the engagement probability, we can visualize the relation. It's interesting to observe from the plots that there seems exist an anger threshold, before the threshold, the more angry the tweet, the more likely the tweet gets active engagement. However, after the tweet's anger reaches the threshold, the more extreme emotion make people less engaged with democrat's tweets, but keep engaged with republican's tweets at the same level. As for the emotion joy, the plot shows that the more joyful the tweet, the less likely it gets active engagement. In addition, the plots give the information that people are more likely to engage with angry tweets than joyful tweets.
+
+
+```{r}
+# variables names by data type
+vars_binary <- c("engageQuoted_active", "engageRetweet_active",
+                 "has_url", "has_media", "is_independent")
+vars_continuous <- c("favor_perFriend", "hashtag_num", "mention_num", "tweetLength",
+                     "anticipation", "anger", "joy", "trust", "sadness", "surprise", "disgust")
+vars_category <- c("listed_level", "party")
+
+# variables at their median/highest frequency values
+row_binary <- sapply(data_model[, vars_binary], function(x) ifelse(mean(x) > 0.5, 1, 0))
+row_continuous <- sapply(data_model[, vars_continuous], function(x) median(x))
+row_category <- sapply(data_model[, vars_category], function(x) {
+  x <- as.factor(x)
+  xlevels = levels(x)
+  xfreq = table(x)
+  idx = which(xfreq == max(xfreq))
+  xlevels[idx]
+})
+
+# construct new data
+# only variable of interest is changing
+# other variables are at constant values
+n <- 100
+newdata <- data.frame(matrix(nrow = 1, ncol = ncol(data_model)-1))
+newdata[1,] <- c(row_binary, row_continuous, row_category)
+newdata <- do.call("rbind", replicate(n, newdata, simplify = FALSE))
+colnames(newdata) <- c(vars_binary, vars_continuous, vars_category) 
+newdata <- newdata %>% 
+  mutate(across(-c("party"), ~as.numeric(.x)))
+```
+
+
+```{r fig.width = 6, fig.height = 5}
+# changes of outcome probability by anger, stratified by party
+u_anger <- seq(min(data_model$anger), max(data_model$anger), length = n)
+data_anger_D <- newdata %>% 
+  mutate(anger = u_anger, party = "D")
+data_anger_R <- newdata %>% 
+  mutate(anger = u_anger, party = "R")
+y_anger_D <- predict(mod_inter_glm, newdata = data_anger_D, type = "response")
+y_anger_R <- predict(mod_inter_glm, newdata = data_anger_R, type = "response")
+# plot
+plot(u_anger, y_anger_D, type = "l", col=colors_xl[1], lwd = 3,
+     ylim = c(0,1), xlim = c(0, 1.3),
+     xlab = "Tweet's anger score", ylab = "Prob. of engagement",
+     main = "probability of engagement VS anger score\nby party")
+lines(u_anger, y_anger_R, type = "l", col=colors_xl[3], lwd = 3)
+legend("topleft", legend=c("Democrat", "Republic"),
+       col=colors_xl[c(1,3)], lty = c(1,1), cex=0.8)
+
+# changes of outcome probability by joy, stratified by party
+u_joy <- seq(min(data_model$joy), max(data_model$joy), length = n)
+data_joy_D <- newdata %>% 
+  mutate(joy = u_joy, party = "D")
+data_joy_R <- newdata %>% 
+  mutate(joy = u_joy, party = "R")
+y_joy_D <- predict(mod_inter_glm, newdata = data_joy_D, type = "response")
+y_joy_R <- predict(mod_inter_glm, newdata = data_joy_R, type = "response")
+# plot
+plot(u_joy, y_joy_D, type = "l", col=colors_xl[1], lwd = 3,
+     ylim = c(0,1), xlim = c(0, 1.3),
+     xlab = "Tweet's joy score", ylab = "Prob. of engagement",
+     main = "probability of engagement VS joy score\nby party")
+lines(u_joy, y_joy_R, type = "l", col=colors_xl[3], lwd = 3)
+legend("topleft", legend=c("Democrat", "Republic"),
+       col=colors_xl[c(1,3)], lty = c(1,1), cex=0.8)
+```
+
+
+# Results interpretation
+
+From section 5 we have made the conclusion that the emotion anger makes people more likely to engage with the tweet than joy and other emotions. Now the question of interest is what the tweets are talking about, and what makes the tweet angry or joyful? I investigate the top 10 angry and joyful words used by republican and democratic politicians in the tweets in Jan. 2021. It shows that democratic tweets use more angry and joyful words than the republican tweets. Recalling the news back at Jan. 2021, the most anger-triggered event was the capitol attack. And the Word frequency plot shows that politicians from both parties are angry about the event, but their tones or narratives are a bit different. Democrats used the angry words like "insurrection" and "mob", while those words didn't not appear in republican's tweets as much often. As for the joyful events, the inauguration was what politicians mentioned most in Jan. 2021.
+
+## Top anger and joy words used in the tweets
+
+```{r fig.width = 6, fig.height = 5}
+load("data/data_word.rda")
+library(tidytext)
+library(widyr)
+
+emotions <- get_sentiments("nrc") %>% 
+  filter(sentiment == "anger" | sentiment == "joy")
+
+data_word %>% 
+  select(party, text) %>% 
+  mutate(party = ifelse(party == "R", "Republic", "Democrat")) %>% 
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words, by = c("word")) %>% 
+  inner_join(emotions, by=c("word")) %>% 
+  count(word, sentiment, party, sort = TRUE) %>% 
+  group_by(party, sentiment) %>% 
+  slice_max(n, n=10) %>% 
+  ungroup() %>% 
+  mutate(word = reorder(word, n)) %>% 
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  scale_fill_manual(values=c("#e9bbab", "#abe9bb"))+
+  facet_wrap(~party+sentiment, scales = "free_y") +
+  labs(y = NULL, x= "Word frequency in Jan. 2021",
+       title = "Top 10 angry and joy words used by party in Jan. 2021") +
+  theme_minimal()
+  
+```
+
+## Politicians' networks in angry and joyful tweets
+
+We know that politicians from different parties usually have different opinions. But are they also divisive in the events that make they angry or happy at the same time? In this section, I made network plots of the politicians based on their correlations in terms of the angry words and joyful words used in the tweets. As can be observed from the network plots, the democrats and republicans are very divisive when it comes to the tweets content that invokes angry feelings, as we can see that the nodes of same color are more likely clustered together. Nevertheless, the two parties are less divisive when tweeting contents that has joyful attitudes, as the nodes of different colors are clustered together, but still the correlaiton between nodes of different colors are weakers than the correlations between nodes of the same color.  
+
+```{r fig.width = 6, fig.height = 5}
+load("data/data_party.rda")
+library(igraph)
+library(ggraph)
+
+## tweets correlation in anger
+cor_anger <- data_word %>% 
+  select(screen_name, party, text) %>% 
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words, by = c("word")) %>% 
+  inner_join(emotions %>% filter(sentiment == "anger"), by=c("word")) %>% 
+  count(screen_name, word, sort = TRUE) %>% 
+  pairwise_cor(screen_name, word, n, sort = TRUE) %>% 
+  filter(correlation > 0.7)
+
+## make network graph
+graph_anger <- graph_from_data_frame(cor_anger, directed = FALSE)
+name_anger <- c(V(graph_anger)$name)
+idx_anger <- sapply(name_anger, function(i) which(data_party$screen_name == i))
+V(graph_anger)$party <- data_party$party[idx_anger]
+
+##
+graph_anger %>% 
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(alpha = correlation, width = correlation)) +
+  geom_node_point(aes(col = party), size = 2) +
+  geom_node_text(aes(label = name), repel = TRUE, label.size = 0.1) +
+  scale_color_manual(values=c("blue", "red")) +
+  theme_void() +
+  ggtitle("Politician network by their angry words correlations")
+```
+
+```{r fig.width = 6, fig.height = 5}
+## tweets correlation in joy
+cor_joy <- data_word %>% 
+  select(screen_name, party, text) %>% 
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words, by = c("word")) %>% 
+  inner_join(emotions %>% filter(sentiment == "joy"), by=c("word")) %>% 
+  count(screen_name, word, sort = TRUE) %>% 
+  pairwise_cor(screen_name, word, n, sort = TRUE) %>% 
+  filter(correlation > 0.7)
+
+## make network graph
+graph_joy <- graph_from_data_frame(cor_joy, directed = FALSE)
+name_joy <- c(V(graph_joy)$name)
+idx_joy <- sapply(name_joy, function(i) which(data_party$screen_name == i))
+V(graph_joy)$party <- data_party$party[idx_joy]
+
+##
+graph_joy %>% 
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(alpha = correlation, width = correlation)) +
+  geom_node_point(aes(col = party), size = 2) +
+  geom_node_text(aes(label = name), repel = TRUE, label.size = 0.2) +
+  scale_color_manual(values=c("blue", "red")) +
+  theme_void() +
+  ggtitle("Politician network by their joy words correlations")
+```
+
+
+# Next steps
+
+In this report, I have investigated both quantitatively and qualitatively, how the emotions, especially anger and joy, are affecting people's engagement with politicians from different parties. The major conclusion is that angry tweets make people more likely to engage with it than other emotions. However, due to the fact that in Jan. 2021, the whole nation was in shock of the capitol attack, it's possible that people could experience more extreme emotions than usual, which prompted them to engagement more with the politicians' tweets. The conclusion can be further verified and examined on tweets collected at time period. Additionally, the report is focusing on the effects of certain predictors on the outcome, it does not investigate the predictive accuracy of the fitted models, the topic can be expanded in the future if model's predictive ability is of interest.
+
+
+
+
+
+
+
+
+
+
+
+
