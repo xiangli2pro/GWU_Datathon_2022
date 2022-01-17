@@ -1,4 +1,11 @@
-# 75th percentile of the engagement in year 2021
+######---------------------------------------------------------######
+
+# This file contains all the customized helper functions for data_pipeline.R
+
+######---------------------------------------------------------######
+
+
+# 75th percentile of the engagement rate of all tweets in year 2021
 engage_2021 <- 0.0152
 
 # count hashtags
@@ -8,7 +15,7 @@ hashtag_counts <- function(hashtag){
   return(sum(!is.na(v)))
 }
 
-# popular hashtags
+# whether or not hashtags are popular
 hashtag_popul <- function(hashtag, hashtag_freq){
   
   v <- str_extract_all(hashtag, "[a-zA-Z0-9]{2,}")[[1]]
@@ -40,7 +47,7 @@ hashtag_extract <- function(hashtag_vec){
     summarise(n = n())
 }
 
-# count mentions
+# count mentioned names
 mention_counts <- function(mention){
   
   v <- str_extract_all(mention, "\\d+")[[1]]
@@ -51,12 +58,18 @@ mention_counts <- function(mention){
 text_clean <- function(text){
     text %>% 
     iconv(from = "latin1", to = "ascii", sub = "byte") %>% 
+    # remove emoji
     str_replace_all("<.{2}>", "") %>% 
+    # remove symbols
     str_replace_all("[$~+=-]", "") %>% 
     str_replace_all("[@|#|&]\\w+", "") %>% 
+    # remove urls
     str_replace_all("http[s]?://.+", "") %>% 
+    # remove numbers
     str_replace_all("\\d+\\w*\\d*", "") %>% 
+    # remove puncuations
     str_replace_all("[[:punct:]]", "") %>% 
+    # remove white spaces
     str_replace_all("\n", "") %>% 
     str_replace_all("^\\s+", "") %>%
     str_replace_all("\\s+$", "") %>% 
@@ -106,6 +119,7 @@ name_matches <- function(name, twitter_users){
   return(screen_name)
 }
 
+# match the Last name
 secName_matches <- function(name, twitter_users){
   
   v <- str_detect(name, twitter_users$secName)

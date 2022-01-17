@@ -38,7 +38,7 @@ The social media has become an indispensable part in human's life, which has ser
 
 # Supplementary material
 
-Code, report and video presentations are available on Xiang Li's github repository at ?????.
+Code, report and video presentations are available on Xiang Li's github repository at https://github.com/xiangli2pro/GWU_Datathon_2022.
 
 # Exploratory data analysis
 
@@ -134,7 +134,9 @@ The question of interest is to predict the Twitter users' engagement with the po
 
 I first define the `engagement rate`:
 
-$$\small engage\_rate = \frac{1}{2}(\frac{favoriate\_count + retweet\_count}{followers\_count}+\frac{favoriate\_count + retweet\_count}{statuses\_count}) $$
+$$
+engage\_rate = \frac{1}{2}(\frac{favoriate\_count + retweet\_count}{followers\_count}+\frac{favoriate\_count + retweet\_count}{statuses\_count}) 
+$$
 where `favoriate_count` and `retweet_count` are the number of favorites and retweets received by the tweet, and `followers_count` and `statuses_count` are the tweet user's followers number and the total number of tweets that the user has posted respectively. In principle, the rate takes into account the average interaction gives out by each follower and the average interaction received by each tweet. Using this equation, I then calculate the engagement rates for all tweets posted by the politicians in the year 2021 and locate the 75% percentile, and assign it to a constant variable `engage\_thresh`. Next I define the binary variable `engage_active`, which has value 1 if the tweet's engagement rate is above that `engage\_thresh`, otherwise it's 0. `engage_active=1` indicates that the tweet has active engagement.
 
 $$engage\_active = ifelse (engage\_rate > engage\_thresh, 1,0 ).$$

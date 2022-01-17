@@ -1,4 +1,13 @@
-## data imported
+######---------------------------------------------------------######
+
+# This file is a one-stop shop to process any input data to data ready for analysis
+# Input data are Twitter API data with 90 features in total
+# Output data has 22 variables in total
+
+######---------------------------------------------------------######
+
+
+## import raw data and name it data
 
 ## load customized functions
 source("functions.R")
@@ -29,14 +38,14 @@ var_names <- c("favorite_count", "retweet_count", "followers_count", "statuses_c
                "retweet_friends_count", "retweet_statuses_count" # relate to retweet tweet
                )
 
-
 ## hashtag frequency
 hashtag_freq <- hashtag_extract(data$hashtags)
 
-## mutate numeric variables
+## create user-specific predictors
 data_num <- data %>% 
   select(var_names) %>% 
   distinct() %>% 
+  ## engagement rate of retweeted and quoted tweets
   mutate(engage_rate = ((favorite_count+retweet_count)/followers_count +
            (favorite_count+retweet_count)/statuses_count)/2,
          engageQuoted_rate = ((quoted_favorite_count+quoted_retweet_count)/quoted_followers_count +
@@ -46,11 +55,13 @@ data_num <- data %>%
   mutate(engage_active = ifelse(engage_rate > engage_2021, 1, 0),
          engageQuoted_active = ifelse(engageQuoted_rate > engage_2021, 1, 0),
          engageRetweet_active = ifelse(engageRetweet_rate > engage_2021, 1, 0)) %>% 
+  ## listed_level
   mutate(listed_level = case_when(
     listed_count <= quantile(data$listed_count, probs = 0.25) ~ 1,
     listed_count > quantile(data$listed_count, probs = 0.25) & listed_count <= quantile(data$listed_count, probs = 0.50) ~ 2,
     listed_count > quantile(data$listed_count, probs = 0.50) & listed_count <= quantile(data$listed_count, probs = 0.75) ~ 3,
     listed_count > quantile(data$listed_count, probs = 0.75) & listed_count <= quantile(data$listed_count, probs = 1) ~ 4)) %>% 
+  ## independence of the tweets
   mutate(is_reply = ifelse(is.na(reply_to_status_id), 0, 1),
          is_quote = is_quote*1,
          is_retweet = is_retweet*1,
@@ -66,17 +77,19 @@ data_num <- data %>%
          -quoted_favorite_count, -quoted_retweet_count, -quoted_followers_count,
          -retweet_favorite_count, -retweet_retweet_count, -retweet_followers_count) 
 
-## mutate_text variables
-## tokenize
+## create text-specific predictors
+## tokenize tweet
 data_tweet <- data %>% 
   select(status_id, text) %>% 
   text_emotion()
 
+## tokenize qutoed tweet
 data_quoted <- data %>% 
   select(status_id, quoted_text) %>% 
   rename(text = quoted_text) %>% 
   text_emotion()
 
+## length of cleaned text
 data_textLen <- data %>% 
   select(status_id, text) %>%
   rowwise() %>% 
@@ -92,8 +105,8 @@ data_textLen <- data %>%
               ungroup() %>% 
               select(-quoted_text), by = c("status_id")) %>% 
   mutate(across(everything(), ~replace_na(.x, 0)))
-# save(data_textLen, file = "data/data_textLen.rda")
-  
+
+## count emotion words from each tweet
 data_emotion <- (data_tweet %>% 
                    select(-word) %>% 
                    group_by(status_id) %>%
@@ -126,7 +139,7 @@ data_party <- data %>%
   select(screen_name, name) %>% 
   party_matches(twitter_users_upd)
 
-## combine the final variables for modelling
+## combine the final variables for further analysis
 data_model <- data_num %>% 
   select(status_id, screen_name, 
          engage_rate, engage_active, engageQuoted_rate, engageQuoted_active,
